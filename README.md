@@ -7,17 +7,6 @@ It is:
 *"Do we have high-confidence evidence this is a usable physical address. Not a PO Box,
 CMRA, PBSA, General Delivery, or unverified address?"* 
 
-## Decision model
-
-`evaluate_address(...)` returns one of four states — never a bare boolean:
-
-| `AddressDecision` | Meaning | Suggested action |
-|---|---|---|
-| `ALLOW_PHYSICAL` | Verified physical address, no PO/CMRA/PBSA signal | Accept |
-| `BLOCK_PO_CMRA` | Confirmed PO Box / CMRA / PO Box Street Address | Reject, re-prompt |
-| `REVIEW_UNVERIFIED` | Not enough evidence (provider failed, blank fields, no match) | Manual review |
-| `REVIEW_AMBIGUOUS` | Candidates disagree, or a soft regex hit conflicts with an allow | Manual review |
-
 ## Pipeline
 
 ```text
