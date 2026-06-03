@@ -6,8 +6,6 @@ Two-stage pipeline:
 1. **Regex stage** — pure-function, zero network. Catches obviously-labeled PO Boxes (`PO Box`, `P.O. Box`, `PMB`, `Postal Box`, `PO Drawer`, `Lock Box`) and obviously-street addresses (leading number + recognized suffix).
 2. **Smarty US Street Address fallback** — only called when the regex stage is uncertain. Uses `metadata.record_type == "P"` or `analysis.dpv_cmra == "Y"` to flag PO Boxes and CMRA mailboxes (UPS Store, iPostal1, etc.) the same way.
 
-Zero runtime dependencies. Stdlib only.
-
 ## Install
 
 ```bash
@@ -50,8 +48,6 @@ CMRA addresses (e.g. UPS Store) are folded into `is_po_box=True`.
 | `smarty_auth_token` / `SMARTY_AUTH_TOKEN` | Smarty server-side Auth Token |
 | `dry_run` / `POBOX_DRY_RUN=1` | Skip Smarty calls; return regex best-guess |
 
-The library never throws on Smarty failures — network errors, quota exhaustion,
-malformed responses all degrade to a low-confidence regex result.
 
 ## Test
 
