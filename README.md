@@ -1,46 +1,90 @@
 # pobox-detector
 
-Deterministic Python library that classifies whether an address is a PO Box.
+Fail-closed address classifier for CIP / KYB eligibility gating.
 
-Two-stage pipeline:
-1. **Regex stage** — pure-function, zero network. Catches obviously-labeled PO Boxes (`PO Box`, `P.O. Box`, `PMB`, `Postal Box`, `PO Drawer`, `Lock Box`) and obviously-street addresses (leading number + recognized suffix).
-2. **Smarty US Street Address fallback** — only called when the regex stage is uncertain. Uses `metadata.record_type == "P"` or `analysis.dpv_cmra == "Y"` to flag PO Boxes and CMRA mailboxes (UPS Store, iPostal1, etc.) the same way.
+The question this answers is **not** "is this string a PO Box?" It is: *"Do we
+have high-confidence evidence this is a usable physical address — not a PO Box,
+CMRA, PBSA, General Delivery, or unverified address?"* For a banking use case,
+**regex may block, but regex never conclusively allows.** Only an authoritative
+address-validation result with every PO/CMRA/PBSA signal checked may allow;
+everything else is blocked, re-prompted, or sent to manual review.
 
-Zero runtime dependencies. Stdlib only.
+## Decision model
 
-## Install
+`evaluate_address(...)` returns one of four states — never a bare boolean:
 
-```bash
-pip install -e .
+| `AddressDecision` | Meaning | Suggested action |
+|---|---|---|
+| `ALLOW_PHYSICAL` | Verified physical address, no PO/CMRA/PBSA signal | Accept |
+| `BLOCK_PO_CMRA` | Confirmed PO Box / CMRA / PO Box Street Address | Reject, re-prompt |
+| `REVIEW_UNVERIFIED` | Not enough evidence (provider failed, blank fields, no match) | Manual review |
+| `REVIEW_AMBIGUOUS` | Candidates disagree, or a soft regex hit conflicts with an allow | Manual review |
+
+## Pipeline
+
+```text
+normalize all fields (NFKC, strip zero-width, map confusables)
+  -> regex screen  (positive-only: may BLOCK or flag REVIEW, never ALLOWS)
+       block            -> BLOCK_PO_CMRA            (terminal; no provider call)
+       otherwise        -> Smarty US Street Address (every candidate, up to 10)
+            provider untrusted        -> REVIEW_UNVERIFIED   (fail closed)
+            verified + clean physical -> ALLOW_PHYSICAL
+            any PO/CMRA/PBSA indicator -> BLOCK_PO_CMRA
+            ambiguous / insufficient   -> REVIEW_*
+  a soft regex hit floors the result at REVIEW — it can never become ALLOW
 ```
+
+A street suffix is **not** evidence of a physical address: CMRAs and USPS PO Box
+Street Addressing deliberately use street-style formats (e.g. `500 Main Street
+#59` that still delivers to a PO Box). The old "street suffix ⇒ not a PO Box"
+shortcut has been removed.
+
+### Smarty indicators checked
+
+Block: `record_type=P`, `dpv_cmra=Y`, `dpv_footnotes` contains `PB` (PO Box
+street-style) or `RR` (confirmed PMB), `components.pmb_designator`/`pmb_number`
+present, `carrier_route` in `C770–C779`, `zip_type=POBox`.
+
+Review (cannot clear): `record_type` not in the allowed physical set (`S/H/F` by
+default — blank, `G` General Delivery and `R` Rural Route fall here),
+`dpv_cmra=""` (CMRA not evaluated), `dpv_match_code != Y` (secondary dropped or
+missing), `dpv_vacant=Y`, `dpv_no_stat=Y`, footnotes `P1/P3/G1/R1`.
+
+> Note: Smarty marks PO Boxes "Residential" in RDI, so `rdi` is **not** used as
+> proof of a physical residence.
 
 ## Use
 
 ```python
-from pobox_detector import check_po_box, Config
+from pobox_detector import evaluate_address, AddressInput, AddressDecision, Config
 
-# Read SMARTY_AUTH_ID / SMARTY_AUTH_TOKEN from env:
-result = check_po_box("PO Box 5")
-# Result(is_po_box=True, confidence='high', method='regex', reason="matched:'PO Box'")
-
-# Or pass an explicit config (the backend-integration path):
 cfg = Config(smarty_auth_id=settings.SMARTY_ID, smarty_auth_token=settings.SMARTY_TOKEN)
-result = check_po_box("Ste 400, Reno, NV 89501", config=cfg)
-# Result(is_po_box=..., confidence='high', method='smarty', reason='smarty:record_type=...')
+
+# Prefer structured fields — the provider can then isolate the secondary / PMB
+# designator, and there is no brittle comma-parsing.
+d = evaluate_address(
+    AddressInput(line1="3214 N University Ave", line2="#409", city="Provo", state="UT"),
+    config=cfg,
+)
+if d.decision is AddressDecision.ALLOW_PHYSICAL:
+    ...
+elif d.decision is AddressDecision.BLOCK_PO_CMRA:
+    ...
+else:  # REVIEW_UNVERIFIED / REVIEW_AMBIGUOUS
+    ...   # route to manual review; never auto-accept
+
+# A single freeform string also works (treated as Smarty freeform `street`):
+evaluate_address("PO Box 5", config=cfg)   # -> BLOCK_PO_CMRA (regex, no network)
 ```
 
-## Result
+`Decision` carries `decision`, a short `reason`, and an `evidence` dict
+(record_type, footnotes, carrier route, candidate count, …) for the audit trail.
 
-```python
-@dataclass(frozen=True)
-class Result:
-    is_po_box: bool
-    confidence: Literal["high", "low"]   # high = signal trusted, low = degraded path
-    method: Literal["regex", "smarty"]
-    reason: str                          # short trace for logging
-```
+### Deprecated boolean shim
 
-CMRA addresses (e.g. UPS Store) are folded into `is_po_box=True`.
+`check_po_box(...) -> Result` is kept for backward compatibility. **REVIEW states
+surface as `is_po_box=False, confidence="low"` — do not treat `confidence="low"`
+as "cleared".** Gate new code on `evaluate_address(...).decision`.
 
 ## Config
 
@@ -48,14 +92,35 @@ CMRA addresses (e.g. UPS Store) are folded into `is_po_box=True`.
 |---|---|
 | `smarty_auth_id` / `SMARTY_AUTH_ID` | Smarty server-side Auth ID |
 | `smarty_auth_token` / `SMARTY_AUTH_TOKEN` | Smarty server-side Auth Token |
-| `dry_run` / `POBOX_DRY_RUN=1` | Skip Smarty calls; return regex best-guess |
+| `dry_run` / `POBOX_DRY_RUN=1` | Skip Smarty; un-blocked input becomes `REVIEW_UNVERIFIED` (still fail-closed) |
+| `candidates` | Candidates to request for ambiguous input (default 10) |
+| `allowed_record_types` | `record_type`s eligible for ALLOW (default `{S,H,F}`) |
+| `require_dpv_match_y` | Require `dpv_match_code == "Y"` to allow (default True) |
 
-The library never throws on Smarty failures — network errors, quota exhaustion,
-malformed responses all degrade to a low-confidence regex result.
+Provider failure, quota exhaustion, SSL error, malformed JSON, or no credentials
+all degrade to `REVIEW_UNVERIFIED` — never to ALLOW.
 
-## Test
+## Caller responsibilities (out of scope for this library)
+
+This library decides one address. A production CIP/KYB gate still needs:
+
+- **Audit trail** — persist normalized input, provider request ID, the
+  `evidence` fields, decision, reason, and rules version. Never log Smarty auth
+  tokens or full query URLs.
+- **Manual review path** — don't hard-deny edge cases automatically; handle
+  documented exceptions (e.g. state Address Confidentiality Program participants).
+- **Separate mailing vs CIP addresses** — a PO Box may be fine as a *mailing*
+  address while a physical address is still required for CIP.
+- **Monitoring** — seed known CMRA/PBSA examples into daily tests; alert on
+  spikes in blank/ambiguous/failed provider responses.
+- **Second source for high-risk cases** — a second provider or maintained
+  CMRA/PBSA dataset reduces vendor-specific blind spots.
+
+## Install / test
 
 ```bash
 pip install -e .[dev]
 pytest -q
 ```
+
+Zero runtime dependencies (stdlib only).
