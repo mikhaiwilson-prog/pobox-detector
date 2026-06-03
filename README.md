@@ -45,6 +45,7 @@ elif d.decision is AddressDecision.BLOCK_PO_CMRA:
 else:  # REVIEW_UNVERIFIED / REVIEW_AMBIGUOUS
     ...   # route to manual review; never auto-accept
 
+```
 
 
 ## Config
@@ -61,5 +62,3 @@ else:  # REVIEW_UNVERIFIED / REVIEW_AMBIGUOUS
 pip install -e .[dev]
 pytest -q
 ```
-
-Zero runtime dependencies (stdlib only).
