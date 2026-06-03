@@ -42,6 +42,15 @@ def evaluate_address(address: str | AddressInput, config: Config | None = None) 
     if signal == "block":
         return Decision(AddressDecision.BLOCK_PO_CMRA, reason, {"stage": "regex"})
 
+    # US-only gate: a non-US address must not be cleared via the US endpoint.
+    # (Freeform input has no country, so it defaults to US and is screened above.)
+    if not addr.is_freeform and addr.country and addr.country.strip().upper() not in {"US", "USA"}:
+        return Decision(
+            AddressDecision.REVIEW_UNVERIFIED,
+            f"unsupported_country:{addr.country}",
+            {"stage": "policy"},
+        )
+
     # Regex cannot clear an address — an authoritative provider result is
     # required. Without one, fail closed to review.
     if cfg.dry_run:
@@ -67,20 +76,48 @@ def evaluate_address(address: str | AddressInput, config: Config | None = None) 
         require_dpv_match_y=cfg.require_dpv_match_y,
     )
 
-    # A soft regex flag must not be overridden by a clean provider allow:
-    # the conflict itself warrants review.
-    if signal == "review" and decision.decision is AddressDecision.ALLOW_PHYSICAL:
-        evidence = dict(decision.evidence)
-        evidence["regex"] = reason
-        return Decision(
-            AddressDecision.REVIEW_AMBIGUOUS,
-            f"regex_review_vs_smarty_allow; {reason}",
-            evidence,
-        )
+    # A clean provider ALLOW can still be downgraded:
+    #  - freeform input is not eligible for auto-clear (late secondary/PMB may
+    #    have been truncated to the first 50 chars before the provider saw it);
+    #  - a soft regex flag conflicting with an allow warrants review.
+    if decision.decision is AddressDecision.ALLOW_PHYSICAL:
+        if cfg.require_structured_for_allow and addr.is_freeform:
+            evidence = dict(decision.evidence)
+            evidence["policy"] = "freeform_not_eligible_for_auto_clear"
+            return Decision(
+                AddressDecision.REVIEW_UNVERIFIED,
+                "freeform_requires_structured_fields_to_allow",
+                evidence,
+            )
+        if signal == "review":
+            evidence = dict(decision.evidence)
+            evidence["regex"] = reason
+            return Decision(
+                AddressDecision.REVIEW_AMBIGUOUS,
+                f"regex_review_vs_smarty_allow; {reason}",
+                evidence,
+            )
     return decision
 
 
 # --- Backward-compatible boolean shim --------------------------------------
+
+
+class IndeterminateAddress(RuntimeError):
+    """Raised by the legacy boolean shim when the decision is a REVIEW state.
+
+    A REVIEW outcome cannot be safely reduced to a yes/no, so the shim refuses
+    to return one — this prevents the classic fail-open mistake
+    ``if not check_po_box(addr).is_po_box: allow(addr)``. Use evaluate_address().
+    """
+
+    def __init__(self, decision: AddressDecision, reason: str) -> None:
+        self.decision = decision
+        self.reason = reason
+        super().__init__(
+            f"Indeterminate address decision: {decision.value} ({reason}). "
+            f"Use evaluate_address() and handle the REVIEW state explicitly."
+        )
 
 
 @dataclass(frozen=True)
@@ -95,13 +132,15 @@ class Result:
 def check_po_box(address: str | AddressInput, config: Config | None = None) -> Result:
     """DEPRECATED boolean view of `evaluate_address`.
 
-    `is_po_box` is True only for a confirmed PO/CMRA block. REVIEW states surface
-    as `is_po_box=False, confidence="low"` — do NOT treat `confidence="low"` as
-    "cleared to use". Gate on `evaluate_address(...).decision` instead.
+    Returns a bool only for the definite states: BLOCK_PO_CMRA -> is_po_box=True,
+    ALLOW_PHYSICAL -> is_po_box=False. REVIEW states raise `IndeterminateAddress`
+    so a caller cannot silently fail open via `if not ...is_po_box: allow`.
+    New code should call `evaluate_address()` and branch on `.decision`.
     """
     d = evaluate_address(address, config)
+    if d.decision in (AddressDecision.REVIEW_UNVERIFIED, AddressDecision.REVIEW_AMBIGUOUS):
+        raise IndeterminateAddress(d.decision, d.reason)
     stage = d.evidence.get("stage")
     method: Literal["regex", "smarty"] = "smarty" if stage == "smarty" else "regex"
     is_po = d.decision is AddressDecision.BLOCK_PO_CMRA
-    high = d.decision in (AddressDecision.ALLOW_PHYSICAL, AddressDecision.BLOCK_PO_CMRA)
-    return Result(is_po, "high" if high else "low", method, d.reason, d.decision)
+    return Result(is_po, "high", method, d.reason, d.decision)

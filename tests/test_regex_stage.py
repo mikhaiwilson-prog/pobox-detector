@@ -20,7 +20,6 @@ from pobox_detector.regex_stage import screen
     "P M B 456",
     "Private Mailbox 456",
     "Private Mail Box 456",
-    "Private Box 12",
     "CMRA",
     "Commercial Mail Receiving Agency",
     "Lock Box 123",
@@ -33,6 +32,7 @@ def test_block_tokens(addr):
 
 @pytest.mark.parametrize("addr", [
     "General Delivery Provo UT 84601",
+    "Private Box 12",
     "Drawer 500",
     "Mailbox 12",
     "Box 42",

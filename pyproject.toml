@@ -1,6 +1,6 @@
 [project]
 name = "pobox-detector"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fail-closed address classifier for CIP/KYB eligibility: regex may block but never allows; a Smarty US Street Address check over every candidate clears only verified physical addresses."
 requires-python = ">=3.10"
 # Zero runtime dependencies. Uses only the Python stdlib.

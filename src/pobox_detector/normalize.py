@@ -5,20 +5,21 @@ fullwidth forms) must be de-obfuscated first, or Stage 1 screening can be
 trivially bypassed. NFKC folds fullwidth/compatibility forms; an explicit
 confusables map handles Greek/Cyrillic letters that NFKC leaves alone because
 they are distinct scripts, not compatibility-equivalent.
+
+All non-ASCII handling is expressed as explicit codepoints (no literal invisible
+or look-alike characters appear in this source) so the rules stay auditable.
 """
 from __future__ import annotations
 
 import re
 import unicodedata
 
-# U+200B..U+200D (zero-width space/non-joiner/joiner), U+2060 (word joiner),
-# U+FEFF (zero-width no-break space / BOM).
-_ZERO_WIDTH = re.compile("[​-‍⁠﻿]")
-_SEPARATORS = re.compile(r"[,\n\r\t]+")
-_WHITESPACE = re.compile(r"\s+")
+# Zero-width / invisible formatting characters to delete:
+#   U+200B ZWSP, U+200C ZWNJ, U+200D ZWJ, U+2060 word joiner, U+FEFF BOM.
+_ZERO_WIDTH_CODEPOINTS = (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF)
 
 # Greek/Cyrillic letters that visually mimic Latin and survive NFKC. Mapped to
-# their Latin look-alike so "PΟ Box" (Greek Omicron) screens as "PO BOX".
+# their Latin look-alike so "P<Greek Omicron> Box" screens as "PO BOX".
 _CONFUSABLES: dict[int, str] = {
     # Cyrillic uppercase
     0x0410: "A", 0x0412: "B", 0x0421: "C", 0x0415: "E", 0x041D: "H",
@@ -36,11 +37,17 @@ _CONFUSABLES: dict[int, str] = {
     0x03BF: "o", 0x03C1: "p", 0x03C7: "x", 0x03BA: "k", 0x03B9: "i",
 }
 
+# One translation table: delete zero-width chars, fold confusables.
+_TRANSLATION: dict[int, str | None] = {cp: None for cp in _ZERO_WIDTH_CODEPOINTS}
+_TRANSLATION.update(_CONFUSABLES)
+
+_SEPARATORS = re.compile(r"[,\n\r\t]+")
+_WHITESPACE = re.compile(r"\s+")
+
 
 def _base(s: str) -> str:
     s = unicodedata.normalize("NFKC", s or "")
-    s = _ZERO_WIDTH.sub("", s)
-    return s.translate(_CONFUSABLES)
+    return s.translate(_TRANSLATION)
 
 
 def normalize_for_provider(s: str) -> str:

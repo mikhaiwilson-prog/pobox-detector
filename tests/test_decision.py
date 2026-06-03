@@ -7,13 +7,18 @@ from pobox_detector.decision import evaluate_smarty_candidates
 
 def cand(record_type="S", dpv_cmra="N", dpv_match_code="Y", dpv_footnotes="AABB",
          dpv_vacant="N", dpv_no_stat="N", zip_type="Standard", carrier_route="C001",
-         pmb_designator="", pmb_number=""):
+         pmb_designator="", pmb_number="", ews_match=False,
+         delivery_line_1="123 Main St", last_line="Reno NV 89501",
+         barcode="895010123459"):
     return {
+        "delivery_line_1": delivery_line_1,
+        "last_line": last_line,
+        "delivery_point_barcode": barcode,
         "metadata": {"record_type": record_type, "zip_type": zip_type,
                      "carrier_route": carrier_route},
         "analysis": {"dpv_cmra": dpv_cmra, "dpv_match_code": dpv_match_code,
                      "dpv_footnotes": dpv_footnotes, "dpv_vacant": dpv_vacant,
-                     "dpv_no_stat": dpv_no_stat},
+                     "dpv_no_stat": dpv_no_stat, "ews_match": ews_match},
         "components": {"pmb_designator": pmb_designator, "pmb_number": pmb_number},
     }
 
@@ -44,6 +49,7 @@ def test_clean_physical_allows():
 
 
 def test_consistent_multiple_clean_allows():
+    # Two clean candidates that collapse to the same canonical delivery point.
     assert d([cand(), cand()]) is AD.ALLOW_PHYSICAL
 
 
@@ -58,6 +64,7 @@ def test_consistent_multiple_clean_allows():
     cand(dpv_match_code="N"),
     cand(dpv_vacant="Y"),
     cand(dpv_no_stat="Y"),
+    cand(ews_match=True),                # street not yet ready for delivery
     cand(dpv_footnotes="AAR1"),          # CMRA w/o PMB
     cand(dpv_footnotes="AAP1"),          # box number missing
 ])
@@ -76,6 +83,20 @@ def test_mixed_review_candidates_is_ambiguous():
 
 def test_any_po_candidate_blocks_even_with_a_clean_one():
     assert d([cand(), cand(record_type="P")]) is AD.BLOCK_PO_CMRA
+
+
+def test_multiple_distinct_clean_candidates_is_ambiguous():
+    # Two clean but DIFFERENT physical addresses — we don't know which was meant.
+    a = cand(delivery_line_1="123 Main St", barcode="895010123459")
+    b = cand(delivery_line_1="123 Main Ave", barcode="895010999999")
+    assert d([a, b]) is AD.REVIEW_AMBIGUOUS
+
+
+def test_multiple_clean_missing_canonical_is_ambiguous():
+    # Clean flags but no canonical identity to prove equivalence -> review.
+    a = cand(delivery_line_1="", last_line="")
+    b = cand(delivery_line_1="", last_line="")
+    assert d([a, b]) is AD.REVIEW_AMBIGUOUS
 
 
 # --- policy knobs ---

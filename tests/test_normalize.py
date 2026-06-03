@@ -1,17 +1,28 @@
-"""Normalization must de-obfuscate before screening, or Stage 1 is bypassable."""
+"""Normalization must de-obfuscate before screening, or Stage 1 is bypassable.
+
+Obfuscation inputs are built from explicit codepoints via chr() so no literal
+invisible or look-alike characters appear in this source.
+"""
 import pytest
 
 from pobox_detector.normalize import normalize_for_match, normalize_for_provider
 
+ZWSP, ZWNJ, ZWJ, WJ, BOM = (chr(c) for c in (0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF))
+GREEK_O = chr(0x039F)          # Greek capital Omicron
+CYR_ER, CYR_O = chr(0x0420), chr(0x041E)   # Cyrillic ER, O
+FW_P, FW_O, FW_HASH = chr(0xFF30), chr(0xFF2F), chr(0xFF03)   # fullwidth P, O, #
+
 
 @pytest.mark.parametrize("raw,expected", [
-    ("P‍O Box 123", "PO BOX 123"),       # zero-width joiner
-    ("P​O Box 123", "PO BOX 123"),       # zero-width space
-    ("PΟBox 123", "POBOX 123"),          # Greek capital Omicron
-    ("РО Box 123", "PO BOX 123"),   # Cyrillic ER + O
-    ("ＰＯ Box 123", "PO BOX 123"),   # fullwidth P O (NFKC)
-    ("１２３ Main St", "123 MAIN ST"),  # fullwidth digits
-    ("123 Main St ＃456", "123 MAIN ST #456"),  # fullwidth hash
+    ("P" + ZWJ + "O Box 123", "PO BOX 123"),
+    ("P" + ZWSP + "O Box 123", "PO BOX 123"),
+    ("P" + WJ + "O Box 123", "PO BOX 123"),
+    ("P" + BOM + "O Box 123", "PO BOX 123"),
+    ("P" + GREEK_O + "Box 123", "POBOX 123"),
+    (CYR_ER + CYR_O + " Box 123", "PO BOX 123"),
+    (FW_P + FW_O + " Box 123", "PO BOX 123"),
+    (chr(0xFF11) + chr(0xFF12) + chr(0xFF13) + " Main St", "123 MAIN ST"),   # fullwidth digits
+    ("123 Main St " + FW_HASH + "456", "123 MAIN ST #456"),
 ])
 def test_de_obfuscation(raw, expected):
     assert normalize_for_match(raw) == expected

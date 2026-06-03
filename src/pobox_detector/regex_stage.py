@@ -23,7 +23,6 @@ _BLOCK: list[tuple[str, re.Pattern[str]]] = [
     ("postal_drawer", re.compile(r"\bpostal\s*drawer\b", re.I)),
     ("pmb", re.compile(r"\bp\.?\s*m\.?\s*b\b", re.I)),
     ("private_mailbox", re.compile(r"\bprivate\s*mail\s*box\b", re.I)),
-    ("private_box", re.compile(r"\bprivate\s*box\b", re.I)),
     ("cmra", re.compile(r"\bcmra\b", re.I)),
     ("cmra_full", re.compile(r"\bcommercial\s*mail\s*receiving\s*agency\b", re.I)),
     ("lock_box", re.compile(r"\block\s*box\b", re.I)),
@@ -35,6 +34,7 @@ _BLOCK: list[tuple[str, re.Pattern[str]]] = [
 # it cannot, we floor at review.
 _REVIEW: list[tuple[str, re.Pattern[str]]] = [
     ("general_delivery", re.compile(r"\bgeneral\s+delivery\b", re.I)),
+    ("private_box", re.compile(r"\bprivate\s*box\b", re.I)),
     ("bare_drawer", re.compile(r"\bdrawer\s+\d", re.I)),
     ("bare_mailbox", re.compile(r"\bmail\s*box\s+\d", re.I)),
     ("bare_box", re.compile(r"\bbox\s+\d", re.I)),

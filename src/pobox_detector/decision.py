@@ -64,6 +64,21 @@ def _carrier_is_pbsa(carrier_route: str) -> bool:
     return bool(_PBSA_CARRIER.fullmatch(carrier_route or ""))
 
 
+def _canonical_signature(c: dict) -> tuple[str, str, str, str]:
+    """Identity of the resolved delivery point (top-level Smarty fields).
+
+    Two candidates with the same signature are the same physical address; two
+    with different signatures are genuinely different addresses, so a
+    multi-candidate response cannot be auto-cleared.
+    """
+    return (
+        (c.get("delivery_line_1") or "").strip().upper(),
+        (c.get("delivery_line_2") or "").strip().upper(),
+        (c.get("last_line") or "").strip().upper(),
+        (c.get("delivery_point_barcode") or "").strip(),
+    )
+
+
 def evaluate_smarty_candidates(
     candidates: list[dict],
     *,
@@ -81,7 +96,6 @@ def evaluate_smarty_candidates(
         )
 
     evidence: dict = {"stage": "smarty", "candidate_count": len(candidates), "flags": []}
-    saw_clean_physical = False
 
     for c in candidates:
         meta = c.get("metadata") or {}
@@ -95,6 +109,7 @@ def evaluate_smarty_candidates(
         dpv_match = analysis.get("dpv_match_code", "") or ""
         dpv_vacant = analysis.get("dpv_vacant", "") or ""
         dpv_no_stat = analysis.get("dpv_no_stat", "") or ""
+        ews_match = analysis.get("ews_match")   # street not yet deliverable
         codes = _footnote_codes(analysis.get("dpv_footnotes", ""))
         pmb = comp.get("pmb_designator") or comp.get("pmb_number")
 
@@ -129,6 +144,7 @@ def evaluate_smarty_candidates(
             or (require_dpv_match_y and dpv_match != "Y")
             or dpv_vacant == "Y"
             or dpv_no_stat == "Y"
+            or bool(ews_match)                         # not yet ready for delivery
             or bool(_REVIEW_FOOTNOTES & codes)
         )
         if review:
@@ -138,13 +154,28 @@ def evaluate_smarty_candidates(
                 "dpv_cmra": dpv_cmra,
                 "dpv_vacant": dpv_vacant,
                 "dpv_no_stat": dpv_no_stat,
+                "ews_match": bool(ews_match),
                 "dpv_footnotes": "".join(sorted(codes)),
             })
-        else:
-            saw_clean_physical = True
 
-    if len(candidates) > 1 and evidence["flags"]:
-        return Decision(AddressDecision.REVIEW_AMBIGUOUS, "smarty:mixed_candidates", evidence)
-    if saw_clean_physical and not evidence["flags"]:
+    if evidence["flags"]:
+        if len(candidates) > 1:
+            return Decision(AddressDecision.REVIEW_AMBIGUOUS, "smarty:mixed_candidates", evidence)
+        return Decision(AddressDecision.REVIEW_UNVERIFIED, "smarty:insufficient_evidence", evidence)
+
+    # All candidates are clean physical addresses. A single candidate clears;
+    # multiple must collapse to one canonical delivery point — otherwise we do
+    # not know which physical address the customer meant.
+    if len(candidates) == 1:
         return Decision(AddressDecision.ALLOW_PHYSICAL, "smarty:verified_physical", evidence)
-    return Decision(AddressDecision.REVIEW_UNVERIFIED, "smarty:insufficient_evidence", evidence)
+
+    signatures = {_canonical_signature(c) for c in candidates}
+    if any(not sig[0] or not sig[2] for sig in signatures):
+        return Decision(
+            AddressDecision.REVIEW_AMBIGUOUS, "smarty:multi_candidate_missing_canonical", evidence
+        )
+    if len(signatures) > 1:
+        return Decision(
+            AddressDecision.REVIEW_AMBIGUOUS, "smarty:multiple_distinct_candidates", evidence
+        )
+    return Decision(AddressDecision.ALLOW_PHYSICAL, "smarty:verified_physical", evidence)
