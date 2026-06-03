@@ -1,0 +1,26 @@
+[project]
+name = "pobox-detector"
+version = "0.1.0"
+description = "Deterministic classifier: is this address a PO Box? Fast regex with a Smarty US Street Address fallback for ambiguous input."
+requires-python = ">=3.10"
+# Zero runtime dependencies. Uses only the Python stdlib.
+dependencies = []
+authors = [{ name = "Relay Risk Team", email = "risk@relayfi.com" }]
+keywords = ["address", "po-box", "cmra", "smarty", "kyb"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pobox_detector"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
