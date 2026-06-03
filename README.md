@@ -39,11 +39,7 @@ Street Addressing deliberately use street-style formats (e.g. `500 Main Street
 #59` that still delivers to a PO Box). The old "street suffix ⇒ not a PO Box"
 shortcut has been removed.
 
-### Smarty indicators checked
-
-Block: `record_type=P`, `dpv_cmra=Y`, `dpv_footnotes` contains `PB` (PO Box
-street-style) or `RR` (confirmed PMB), `components.pmb_designator`/`pmb_number`
-present, `carrier_route` in `C770–C779`, `zip_type=POBox`.
+## Install
 
 Review (cannot clear): `record_type` not in the allowed physical set (`S/H/F` by
 default — blank, `G` General Delivery and `R` Rural Route fall here),
@@ -100,7 +96,6 @@ as "cleared".** Gate new code on `evaluate_address(...).decision`.
 Provider failure, quota exhaustion, SSL error, malformed JSON, or no credentials
 all degrade to `REVIEW_UNVERIFIED` — never to ALLOW.
 
-## Caller responsibilities (out of scope for this library)
 
 This library decides one address. A production CIP/KYB gate still needs:
 
