@@ -19,10 +19,7 @@ normalize all fields (NFKC, strip zero-width, map confusables)
             verified + clean physical -> ALLOW_PHYSICAL
             any PO/CMRA/PBSA indicator -> BLOCK_PO_CMRA
             ambiguous / insufficient   -> REVIEW_*
-  multiple candidates must collapse to one canonical delivery point to ALLOW,
-    else REVIEW_AMBIGUOUS
-  a clean ALLOW is downgraded to REVIEW if the input was freeform-only, or if a
-    soft regex hit conflicts with it
+
 ```
 
 ## Use
